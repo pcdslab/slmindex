@@ -529,7 +529,7 @@ STATUS DSLIM_InitializeSC(UINT threads)
 #ifdef _OPENMP
 #pragma omp parallel for num_threads(threads) schedule(static)
 #endif /* _OPENMP */
-    for (chunk_number = 0; chunk_number < nchunks; chunk_number++)
+    for (chunk_number = 0; chunk_number < threads; chunk_number++)
     {
         /* Check if this chunk is the last chunk */
         UINT size = chunksize;
