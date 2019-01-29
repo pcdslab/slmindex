@@ -1,6 +1,9 @@
 # SLMTransform
 SLM-Transform: A Method for memory-efficient indexing of spectra for database search in LC-MS/MS proteomics
 
+## Authors
+Muhammad Haseeb and Fahad Saeed
+
 # What do you need?
 1. make
 2. GCC v5.4.0 or later with C++11+ support
@@ -68,4 +71,4 @@ SLM-Transform: A Method for memory-efficient indexing of spectra for database se
 4. You are free to fork this repo and make any changes for your application (under the specified license), however, please conform to code format in: lbe_eclipse.xml
 
 # Please cite our work
-For queries about SLM-Transform, please contact: fsaeed@fiu.edu or mhaseeb@fiu.edu. Thank you.
+For queries or questions about SLM-Transform, please contact: {fsaeed, mhaseeb}@fiu.edu. Thank you.
