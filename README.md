@@ -65,6 +65,7 @@ SLM-Transform: A Method for memory-efficient indexing of spectra for database se
 1. Work is being done to move SLM-Transform configuration to runtime so please bear with us.
 2. Max digested peptide mass allowed: 5000Da.
 3. The SLM-Transform only returns the fragment-ion filtered PSMs, which can be used in any way e.g. post filtered based on precursor masses or sequence tags, formally scored for PSMs, FDRed.
+4. You are free to fork this repo and make any changes for your application (under the specified license), however, please conform to code format in: lbe_eclipse.xml
 
 # Please cite our work
 For queries about SLM-Transform, please contact: fsaeed@fiu.edu or mhaseeb@fiu.edu. Thank you.
