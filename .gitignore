@@ -1,11 +1,23 @@
 # Prerequisites
 *.d
 
+# Eclipse Stuff
+.cproject
+.project
+.settings/
+
 # Compiled Object files
 *.slo
 *.lo
 *.o
+*.exe
+*.map
 *.obj
+
+# Output folders
+Debug/
+output/
+objs/
 
 # Precompiled Headers
 *.gch
