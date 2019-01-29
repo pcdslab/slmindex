@@ -12,7 +12,7 @@ SLM-Transform: A Method for memory-efficient indexing of spectra for database se
 3. Optional: The decoy database can be generated and appended to the target database using DBToolkit.
 4. Convert the MS/MS data in (mzML/mzXML/MS2) format (MS2 preferably) using msconvert.exe
 
-# Configure SLM-Transform
+# Configure SLM-Transform & Sample Application
 1. Configure the SLM-Transform parameters in /slmtransform/include/config.h
 2. Add the database, dataset and mods information in the ./slm.cpp (Sample Application) using the following format:
 
@@ -56,7 +56,7 @@ SLM-Transform: A Method for memory-efficient indexing of spectra for database se
 1. Navigate to SLM-Transform home directory /slmtransform/
 2. Execute the following command: `make`
 
-# Running SLM-Transform
+# Running SLM-Transform Sample Application
 1. Navigate to /slmtransform
 2. ./SLMTransform.exe
 
