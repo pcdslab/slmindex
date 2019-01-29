@@ -58,9 +58,6 @@
 #define MIN_MASS                 100
 #define MAX_MASS                 5000
 
-/* Chunk size in number of peptides (def: 1.8M)   */
-#define CHUNKSIZE                1800000
-
 /* Number of fragments (peaks) per query spectrum */
 #define QALEN                    100
 
@@ -74,6 +71,9 @@
 
 /* Enable DSLIM Mods construction                 */
 #define VMODS
+
+/* Chunk size in number of peptides (def: 1.8M)   */
+#define CHUNKSIZE                18000000
 
 /* Enable debug checkpoints                       */
 #undef DEBUG
