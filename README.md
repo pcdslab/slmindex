@@ -13,7 +13,8 @@ SLM-Transform: A Method for memory-efficient indexing of spectra for database se
 4. Convert the MS/MS data in (mzML/mzXML/MS2) format (MS2 preferably) using msconvert.exe
 
 # Configure SLM-Transform & Sample Application
-1. Configure the SLM-Transform parameters in /slmtransform/include/config.h
+1. Configure the SLM-Transform parameters in /slmtransform/include/config.h: 
+*Make sure that #define/undef WINDOWS is correct according to your Host OS else there will be Seg faults.*
 2. Add the database, dataset and mods information in the ./slm.cpp (Sample Application) using the following format:
 
 ## Format
