@@ -15,6 +15,9 @@ Muhammad Haseeb and Fahad Saeed
 3. Optional: The decoy database can be generated and appended to the target database using DBToolkit.
 4. Convert the MS/MS data in (mzML/mzXML/MS2) format (MS2 preferably) using msconvert.exe
 
+# The Sample Driver Application
+The sample application shows the software pipeline for successfully incorporating SLM-Transform for peptide search. The application firsts initializes SLM Peptide and Ions Index (SPI and SII) respectively. Then the raw fragment-ion match score based query is conducted against SLM-Index. The driver application creates an array called Matches (99999 hits x 1000 queries) which is filled with index number of candidate PSMs using SLM-Querying algorithm. The candidate PSMs can be further processed or filtered as required by the application. However, the sample application just discards the results and records the execution time only. There is another version of sample application; that counts the PSMs discovered per query peptide. That application can be used to measure stats and can be requested from authors by email if required. 
+
 # Configure SLM-Transform & Sample Application
 1. Configure the SLM-Transform parameters in /slmtransform/include/config.h: 
 *Make sure that #define/undef WINDOWS is correct according to your Host OS else there will be Seg faults.*
@@ -67,8 +70,8 @@ Muhammad Haseeb and Fahad Saeed
 # Please Note:
 1. Work is being done to move SLM-Transform configuration to runtime so please bear with us.
 2. Max digested peptide mass allowed: 5000Da.
-3. The SLM-Transform only returns the fragment-ion filtered PSMs, which can be used in any way e.g. post filtered based on precursor masses or sequence tags, formally scored for PSMs, FDRed.
-4. You are free to fork this repo and make any changes for your application (under the specified license), however, please conform to code format in: lbe_eclipse.xml
+3. The SLM-Transform only returns the fragment-ion filtered PSMs (not the final PSMs), which can be used in any way e.g. post filtered based on precursor masses or sequence tags, formally scored for PSMs, FDRed.
+4. Please contact us if you experience any trouble or bugs in the software. Thanks. :)
 
 # Please cite our work
 For queries or questions about SLM-Transform, please contact: {fsaeed, mhaseeb}@fiu.edu. Thank you.
