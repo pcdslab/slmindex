@@ -51,9 +51,9 @@ Muhammad Haseeb and Fahad Saeed
     vModInfo.vmods[0].residues[1] = 'T'; // T
     vModInfo.vmods[0].residues[2] = 'Y'; // Y
     
-    vModInfo.vmods[0].aa_per_peptide = 2; // #2 from previous explanation, for above example, set this to: 3
-    vModInfo.vmods[0].modMass = 15.997 * SCALE; // Mass of the specified modification, for above example: 79.97
-    vModInfo.vmods[0].residues[0] = 'M'; // modified residues list (max 4 per mod type allowed), for above example S
+    vModInfo.vmods[0].aa_per_peptide = 2; // #2 from previous explanation, for above example, set this to: 2
+    vModInfo.vmods[0].modMass = 15.997 * SCALE; // Mass of the specified modification, for above example: 15.997
+    vModInfo.vmods[0].residues[0] = 'M'; // modified residues list (max 4 per mod type allowed), for above example M
 
 # Building SLM-Transform Sample Application
 1. Open the Git Bash shell (Windows) or normal Terminal (Ubuntu).
