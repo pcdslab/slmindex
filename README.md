@@ -13,7 +13,7 @@ Muhammad Haseeb and Fahad Saeed
 1. Digest the proteome database using Protein Digestion Simulator or OpenMS.
 2. Remove the redundant peptide sequences in the digested database using DBToolkit.
 3. Optional: The decoy database can be generated and appended to the target database using DBToolkit.
-4. Convert the MS/MS data in (mzML/mzXML/MS2) format (MS2 preferably) using msconvert.exe
+4. Convert the MS/MS data in (mzML/MS2) format using msconvert.exe. The MS/MS data are extracted and processed by MSToolkit.
 
 # The Sample Driver Application
 The sample application shows the software pipeline for successfully incorporating SLM-Transform for peptide search. The application firsts initializes SLM Peptide and Ions Index (SPI and SII) respectively. Then the raw fragment-ion match score based query is conducted against SLM-Index. The driver application creates an array called Matches (99999 hits x 1000 queries) which is filled with index number of candidate PSMs using SLM-Querying algorithm. The candidate PSMs can be further processed or filtered as required by the application. However, the sample application just discards the results and records the execution time only. There is another version of sample application; that counts the PSMs discovered per query peptide. That application can be used to measure stats and can be requested from authors by email if required. 
