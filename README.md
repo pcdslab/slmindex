@@ -1,5 +1,5 @@
 # SLMTransform
-SLM-Transform: A Method for memory-efficient indexing of spectra for database search in LC-MS/MS proteomics
+SLM-Transform: Fast and Memory-Efficient MS/MS Spectra Indexing for Peptide Search in Mass-Spectrometry based Proteomics
 
 ## Authors
 Muhammad Haseeb and Fahad Saeed
