@@ -33,7 +33,7 @@
 #undef BENCHMARK
 
 /* Number of b- and y-ions per indexed fragment   */
-#define F                        40
+#define F                        45
 
 /* Fragment mass tolerance in (Daltons * SCALE)   */
 #define dF                        5 // = 0.05Da
