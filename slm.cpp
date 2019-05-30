@@ -26,6 +26,11 @@
 
 using namespace std;
 
+Index *slm_index = NULL;
+STRING dbpath;
+STRING querypath;
+STRING params;
+
 /* FUNCTION: SLM_Main (main)
  *
  * DESCRIPTION: Driver Application
@@ -35,35 +40,76 @@ using namespace std;
  * OUTPUT
  * @status: Status of execution
  */
-STATUS SLM_Main()
+STATUS SLM_Main(INT argc, CHAR* argv[])
 {
     STATUS status = SLM_SUCCESS;
-    UINT slm_chunks = 0;
-    UINT *QA = NULL;
-    UINT *Matches = NULL;
+
+    /* Print start time */
+    auto start_tim = chrono::system_clock::now();
+    time_t start_time = chrono::system_clock::to_time_t(start_tim);
+    ULONGLONG Matches = 0;
+
     SLM_vMods vModInfo;
-    STRING modconditions = "3 M 2";
 
     /* Benchmarking */
     auto start = chrono::system_clock::now();
     auto end   = chrono::system_clock::now();
     chrono::duration<double> elapsed_seconds = end - start;
+    chrono::duration<double> qtime = end - start;
+
+    STRING modconditions;
+
+    /* Print Header */
+    LBE_PrintHeader();
+
+    cout << endl << "Start Time: " << ctime(&start_time) << endl;
+
+    if (argc < 5)
+    {
+        cout << "ERROR: Missing Params\n"
+                "USAGE: ./uSLM.exe /path/to/peps min_len max_len\n"
+                "FURTHER: Create a params.txt at the above path with mods string\n"
+				"params.txt: <mods_per_pep> <AA1> <per_pep> <AA2> <per_pep> ...";
+        status = ERR_INVLD_PARAM;
+        exit (status);
+    }
 
     /* Database and Dataset files */
-    STRING filename = "/path/to/digested/and/unduplicated/database.fasta";
-    STRING querypath = "/path/to/query/dataset";
-    STRING patt = ".ms2/mzML/mzXML";
+    UINT minlen = atoi(argv[3]);
+    UINT maxlen = atoi(argv[4]);
+
+    dbpath = STRING(argv[1]);
+    querypath = STRING(argv[2]);
+    STRING extension = ".peps";
+    string patt = ".ms2";
+
     DIR*    dir;
     dirent* pdir;
     vector<STRING> queryfiles;
 
     /* Initialize the vModInfo */
-    vModInfo.num_vars = 2;
-    vModInfo.vmods_per_pep = 5;
+    vModInfo.num_vars = 4;
+    vModInfo.vmods_per_pep = 2;
+
     vModInfo.vmods[0].aa_per_peptide = 2;
-    vModInfo.vmods[0].modMass = 15.997 * SCALE;
+    vModInfo.vmods[0].modMass = 15.99 * SCALE;
     vModInfo.vmods[0].residues[0] = 'M';
-	
+
+    vModInfo.vmods[1].aa_per_peptide = 2;
+    vModInfo.vmods[1].modMass = 114.04 * SCALE;
+    vModInfo.vmods[1].residues[0] = 'C';
+    vModInfo.vmods[1].residues[1] = 'K';
+
+    vModInfo.vmods[2].aa_per_peptide = 2;
+    vModInfo.vmods[2].modMass = 0.98 * SCALE;
+    vModInfo.vmods[2].residues[0] = 'N';
+    vModInfo.vmods[2].residues[1] = 'Q';
+
+    vModInfo.vmods[3].aa_per_peptide = 2;
+    vModInfo.vmods[3].modMass = 79.97 * SCALE;
+    vModInfo.vmods[3].residues[0] = 'S';
+    vModInfo.vmods[3].residues[1] = 'T';
+    vModInfo.vmods[3].residues[2] = 'Y';
 
 #ifdef _PROFILE
     ProfilerStart("C:/work/lbe.prof");
@@ -71,18 +117,6 @@ STATUS SLM_Main()
 
     /* Get thread count */
     UINT threads = UTILS_GetNumProcs();
-
-#ifndef _OPENMP
-    threads = 1;
-#endif /* _OPENMP */
-
-    /* Print Header */
-    LBE_PrintHeader();
-
-    /* Print start time */
-    auto start_tim = chrono::system_clock::now();
-    time_t start_time = chrono::system_clock::to_time_t(start_tim);
-    cout << endl << "Start Time: " << ctime(&start_time) << endl;
 
     /* Check for a dangling / character */
     if (querypath.at(querypath.length()- 1) == '/')
@@ -112,83 +146,107 @@ STATUS SLM_Main()
         status = ERR_FILE_NOT_FOUND;
     }
 
-    /* Count the number of ">" entries in FASTA */
-    if (status == SLM_SUCCESS)
+#ifndef _OPENMP
+    threads = 1;
+#endif /* _OPENMP */
+
+    /* Check for a dangling / character */
+    if (dbpath.at(dbpath.length()- 1) == '/')
     {
-        status = LBE_CountPeps(threads, (CHAR *) filename.c_str(), modconditions);
+        dbpath = dbpath.substr(0, dbpath.size() - 1);
     }
 
-    /* Initialize internal structures */
-    if (status == SLM_SUCCESS)
+    STRING params = dbpath + "/param.txt";
+    ifstream pfile((const CHAR *)params.c_str());
+    getline(pfile, modconditions);
+    pfile.close();
+
+    slm_index = new Index[maxlen - minlen + 1];
+
+    if (slm_index == NULL)
     {
-        start = chrono::system_clock::now();
-
-        /* Initialize the LBE */
-        status = LBE_Initialize(threads, modconditions);
-
-        end = chrono::system_clock::now();
-
-        /* Compute Duration */
-        elapsed_seconds = end - start;
-        cout << "SLM Initialized with status:\t" << status << endl;
-        cout << "Elapsed Time: " << elapsed_seconds.count() << "s" <<endl << endl;
+        status = ERR_INVLD_MEMORY;
     }
 
-    /* Distribution Algorithm */
-    if (status == SLM_SUCCESS)
+    for (UINT peplen = minlen; peplen <= maxlen; peplen++)
     {
-        start = chrono::system_clock::now();
+        STRING dbfile = dbpath + "/" + std::to_string(peplen) + extension;
 
-        /* Distribute peptides among cores */
-        status = LBE_Distribute(threads, _chunk, slm_chunks);
+        /* Set the peptide length in the pepIndex */
+        slm_index[peplen-minlen].pepIndex.peplen = peplen;
 
+        /* Count the number of ">" entries in FASTA */
+        if (status == SLM_SUCCESS)
+        {
+            status = LBE_CountPeps(threads, (CHAR *) dbfile.c_str(), modconditions, (slm_index + peplen-minlen));
+        }
+
+        /* Initialize internal structures */
+        if (status == SLM_SUCCESS)
+        {
+            start = chrono::system_clock::now();
+
+            /* Initialize the LBE */
+            status = LBE_Initialize(threads, modconditions, (slm_index + peplen-minlen));
+
+            end = chrono::system_clock::now();
+
+            /* Compute Duration */
+            elapsed_seconds = end - start;
+            cout << "Initialized with status:\t" << status << endl;
+            cout << "Elapsed Time: " << elapsed_seconds.count() << "s" << endl << endl;
+        }
+
+        /* Distribution Algorithm */
+        if (status == SLM_SUCCESS)
+        {
+            start = chrono::system_clock::now();
+
+            /* Distribute peptides among cores */
+            status = LBE_Distribute(threads, _chunk, (slm_index + peplen - minlen));
+
+        }
+
+        /* DSLIM-Transform */
+        if (status == SLM_SUCCESS)
+        {
+            start = chrono::system_clock::now();
+
+            /* Construct DSLIM by SLM Transformation */
+            status = DSLIM_Construct(threads, &vModInfo, dbpath, (slm_index + peplen - minlen));
+
+            end = chrono::system_clock::now();
+
+            /* Compute Duration */
+            elapsed_seconds = end - start;
+            cout << "SLM-Transform with status:\t" << status << endl;
+            cout << "Elapsed Time: " << elapsed_seconds.count() << "s" << endl << endl;
+        }
     }
 
-    /* DSLIM-Transform */
     if (status == SLM_SUCCESS)
     {
-        start = chrono::system_clock::now();
-
-        /* Construct DSLIM by SLM Transformation */
-        status = DSLIM_Construct(threads, &vModInfo);
-
-        end = chrono::system_clock::now();
-
-        /* Compute Duration */
-        elapsed_seconds = end - start;
-        cout << "SLM-Transform with status:\t" << status << endl;
-        cout << "Elapsed Time: " << elapsed_seconds.count() << "s" <<endl<< endl;
+        status = DSLIM_DeallocateSpecArr();
     }
 
-    /* Initialize DSLIM Scorecard Manager */
+    /* Query the index */
     if (status == SLM_SUCCESS)
     {
-        status = DSLIM_InitializeSC(threads);
-        cout << "DSLIM SC Init with status:\t" << status << endl;
-    }
+        /* Allocate the Query Array */
+        UINT *QA = new UINT[QCHUNK * QALEN];
 
-    /* Initialize the Matches array, the matching 
-        peptide indices will be placed in here */
-    Matches = new UINT[MAXMATCHES * QCHUNK];
-
-    /* Allocate the Query Array */
-    QA = new UINT[QCHUNK * QALEN];
-
-    if (status == SLM_SUCCESS)
-    {
         /* Initialize and process Query Spectra */
         for (UINT qf = 0; qf < queryfiles.size(); qf++)
         {
-            cout << endl << "Query File: " << queryfiles[qf].c_str() << endl;
-
             /* Initialize Query MS/MS file */
             status = MSQuery_InitializeQueryFile((CHAR *) queryfiles[qf].c_str());
+            cout << "Query File: " << queryfiles[qf] << endl;
+
+            UINT spectra = 0;
 
             /* DSLIM Query Algorithm */
             if (status == SLM_SUCCESS)
             {
-                UINT qchunk_number = 0;
-
                 /* Extract a chunk of MS/MS spectra and
                  * query against DSLIM Index */
                 for (; QA != NULL;)
@@ -201,51 +259,33 @@ STATUS SLM_Main()
                     {
                         break;
                     }
-
-                    qchunk_number++;
-                    cout << endl << "Extracted Batch of size:\t" << ms2specs << endl;
-
-                    /* Reset Matches */
-                    std::memset(Matches, 0x0, MAXMATCHES * QCHUNK * sizeof(UINT));
+                    spectra += ms2specs;
 
                     start = chrono::system_clock::now();
 
                     /* Query the chunk */
-                    status = DSLIM_QuerySpectrum(QA, ms2specs, Matches, threads);
+                    status = DSLIM_QuerySpectrum(QA, ms2specs, Matches, threads, slm_index, (maxlen-minlen+1));
                     end = chrono::system_clock::now();
 
                     /* Compute Duration */
-                    elapsed_seconds = end - start;
-                    cout << "Queried with status:\t\t" << status
-                            << endl;
-                    cout << "Elapsed Time: " << elapsed_seconds.count() << "s" << endl << endl;
+                    qtime += end - start;
 
                 }
             }
+
+            /* Compute Duration */
+            cout << "Queried Spectra:\t\t" << spectra << endl;
+            cout << "Query Time: " << qtime.count() << "s" << endl;
+            cout << "Queried with status:\t\t" << status << endl << endl;
+            end = chrono::system_clock::now();
+        }
+
+        if (QA != NULL)
+        {
+            delete[] QA;
+            QA = NULL;
         }
     }
-
-    /* Deinitialize DSLIM and LBE */
-    if (status == SLM_SUCCESS)
-    {
-        status = LBE_Deinitialize();
-        cout << endl <<"SLM Deinitialized with status:\t" << status << endl;
-    }
-
-    /* Deallocate QA */
-    if (QA != NULL)
-    {
-        delete[] QA;
-    }
-
-    /* Deallocate Matches */
-    if (Matches != NULL)
-    {
-        delete[] Matches;
-    }
-
-    /* Print final program status */
-    cout << "\n\nLBE ended with status: \t\t" << status << endl;
 
     /* Print end time */
     auto end_tim = chrono::system_clock::now();
@@ -253,6 +293,14 @@ STATUS SLM_Main()
     cout << endl << "End Time: " << ctime(&end_time) << endl;
     elapsed_seconds = end_tim - start_tim;
     cout << "Total Elapsed Time: " << elapsed_seconds.count() << "s" <<endl;
+
+    for (UINT peplen = minlen; peplen <= maxlen; peplen++)
+    {
+        status = LBE_Deinitialize(slm_index + peplen - minlen);
+    }
+
+    /* Print final program status */
+    cout << "\n\nEnded with status: \t\t" << status << endl;
 
 #ifdef _PROFILE
     ProfilerFlush();

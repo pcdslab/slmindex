@@ -1,5 +1,5 @@
 /*
- * This file is part of SLM-Transform
+ * This file is part of Load Balancing Algorithm for DSLIM
  *  Copyright (C) 2019  Muhammad Haseeb, Fahad Saeed
  *  Florida International University, Miami, FL
  *

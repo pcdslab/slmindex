@@ -21,23 +21,13 @@
 #include "lbe.h"
 using namespace std;
 
-ULONGLONG    pepCount;
-ULONGLONG    modCount;
-ULONGLONG  totalCount;
-PepSeqs   seqPep;
-
 vector<STRING> Seqs;
+UINT cumusize = 0;
 
-/* External Variables */
-extern UINT       chunksize;
-extern UINT   lastchunksize;
-extern UINT         nchunks;
-#ifdef VMODS
-extern varEntry *modEntries;
-#endif /* VMODS */
+ifstream file;
 
 /* Static function Prototypes */
-static STATUS LBE_AllocateMem(UINT N, UINT M);
+static STATUS LBE_AllocateMem(Index *index);
 
 /*
  * FUNCTION: LBE_AllocateMem
@@ -51,21 +41,19 @@ static STATUS LBE_AllocateMem(UINT N, UINT M);
  * OUTPUT:
  * @status: Status of execution
  */
-static STATUS LBE_AllocateMem(UINT N, UINT M)
+static STATUS LBE_AllocateMem(Index *index)
 {
     STATUS status = SLM_SUCCESS;
+    UINT M = index->modCount;
+
 #ifdef VMODS
-    modEntries = NULL;
+    index->modEntries = NULL;
 #endif /* VMODS */
 
     /* Allocate Memory for seqPep */
-    seqPep.seqs = new AA[seqPep.AAs];
-    seqPep.idx = new UINT[N+1];
+    index->pepIndex.seqs = new AA[index->pepIndex.AAs];
 
-    /* Set the seqPep.idx[N] to AAs for consistency*/
-    seqPep.idx[N] = seqPep.AAs;
-
-    if (seqPep.seqs == NULL || seqPep.idx == NULL)
+    if (index->pepIndex.seqs == NULL)
     {
         status = ERR_BAD_MEM_ALLOC;
     }
@@ -74,9 +62,9 @@ static STATUS LBE_AllocateMem(UINT N, UINT M)
     /* Allocate the seqMod */
     if (status == SLM_SUCCESS)
     {
-        modEntries = new varEntry[M];
+        index->modEntries = new varEntry[M];
 
-        if (modEntries == NULL)
+        if (index->modEntries == NULL)
         {
             status = ERR_BAD_MEM_ALLOC;
         }
@@ -101,16 +89,16 @@ static STATUS LBE_AllocateMem(UINT N, UINT M)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Initialize(UINT threads, STRING modconditions)
+STATUS LBE_Initialize(UINT threads, STRING modconditions, Index *index)
 {
     STATUS status = SLM_SUCCESS;
     UINT iCount = 1;
     STRING seq;
 
     /* Check if ">" entries are > 0 */
-    if (pepCount > 0)
+    if (index->pepCount > 0)
     {
-        status = LBE_AllocateMem(pepCount, modCount);
+        status = LBE_AllocateMem(index);
     }
     else
     {
@@ -128,8 +116,7 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
         /* Increment counter */
         iCount += 2;
 
-        memcpy((void *)&seqPep.seqs[idx], (const void *)seq.c_str(), seq.length());
-        seqPep.idx[0] = idx;
+        memcpy((void *)&index->pepIndex.seqs[idx], (const void *)seq.c_str(), seq.length());
         idx+=seq.length();
 
 #ifdef DEBUG
@@ -141,11 +128,10 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
             /* Extract Sequences */
             STRING seq = Seqs.at(i);
             /* Copy into the seqPep.seqs array */
-            memcpy((void *) &seqPep.seqs[idx], (const void *) seq.c_str(), seq.length());
+            memcpy((void *) &index->pepIndex.seqs[idx], (const void *) seq.c_str(), seq.length());
 
             /* Increment the counters */
             iCount += 2;
-            seqPep.idx[iCount / 2 - 1] = idx;
             idx += seq.length();
 
 #ifdef DEBUG
@@ -159,11 +145,10 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
     else
     {
         status = ERR_FILE_NOT_FOUND;
-        cout << endl << "ABORT: File could not be opened" << endl;
     }
 
     /* Make sure that the '>' == PEPTIDES */
-    if (iCount != pepCount)
+    if (iCount != index->pepCount && status == SLM_SUCCESS)
     {
         cout << endl << "pepCount != iCount - Please check the FASTA file";
         status = ERR_INVLD_SIZE;
@@ -174,10 +159,10 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
     /* Initialize gModInfo */
     //status = UTILS_InitializeModInfo(modconditions);
 
-    if (modCount > 0)
+    if (index->modCount > 0)
     {
         /* Fill in the mods entry */
-        status = MODS_GenerateMods(threads, modCount, modconditions);
+        status = MODS_GenerateMods(threads, index->modCount, modconditions, index->modEntries);
     }
 #endif /* VMODS */
 
@@ -186,7 +171,7 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
 
     if (status != SLM_SUCCESS)
     {
-        (VOID) LBE_Deinitialize();
+        (VOID) LBE_Deinitialize(index);
     }
 
     return status;
@@ -203,36 +188,11 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Deinitialize(VOID)
+STATUS LBE_Deinitialize(Index *index)
 {
-   (VOID) DSLIM_Deinitialize();
+    (VOID) DSLIM_Deinitialize(index);
 
-    /* Reset all counters */
-    seqPep.AAs = 0;
-    pepCount = 0;
-    modCount = 0;
-    totalCount = 0;
 
-    /* Deallocate memory */
-    if (seqPep.idx != NULL)
-    {
-        delete[] seqPep.idx;
-        seqPep.idx = NULL;
-    }
-
-    if (seqPep.seqs != NULL)
-    {
-        delete[] seqPep.seqs;
-        seqPep.seqs = NULL;
-    }
-
-#ifdef VMODS
-    if (modEntries != NULL)
-    {
-        delete[] modEntries;
-        modEntries = NULL;
-    }
-#endif /* VMODS */
 
     return SLM_SUCCESS;
 }
@@ -250,18 +210,27 @@ STATUS LBE_Deinitialize(VOID)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Distribute(UINT threads, DistPolicy policy, UINT& slm_chunks)
+STATUS LBE_Distribute(UINT threads, DistPolicy policy, Index *index)
 {
     STATUS status = 0;
-    UINT N = totalCount;
-    UINT p = threads;
+    UINT N = index->totalCount;
+    UINT maxchunksize = (MAX_IONS / (index->pepIndex.peplen * MAXz * iSERIES));
+    UINT nchunks;
+    UINT chunksize;
+    UINT lastchunksize;
 
     /* Calculate the chunksize */
-    chunksize = ((N % p) == 0) ? (N / p) : ((N + p) / p);
+    chunksize = std::min(N, maxchunksize);
+
+//            ((N % p) == 0) ? (N / p) : ((N + p) / p);
 
     /* Set the number of chunks to p */
-    nchunks = p;
+    nchunks = (N/chunksize);
 
+    if (chunksize == maxchunksize)
+    {
+        nchunks += 1;
+    }
 
     /* Calculate the size of last chunk */
     UINT factor = N / chunksize;
@@ -291,7 +260,9 @@ STATUS LBE_Distribute(UINT threads, DistPolicy policy, UINT& slm_chunks)
     if (status == SLM_SUCCESS)
     {
         /* Return the number of chunks created */
-        slm_chunks = nchunks;
+        index->nChunks = nchunks;
+        index->chunksize = chunksize;
+        index->lastchunksize = lastchunksize;
     }
 
     return status;
@@ -308,11 +279,6 @@ STATUS LBE_Distribute(UINT threads, DistPolicy policy, UINT& slm_chunks)
  * OUTPUT:
  * @realID: Actual SPI peptide ID
  */
-UINT LBE_RevDist(UINT virtID)
-{
-    /* Return the actual peptide ID */
-    return virtID;
-}
 
 /*
  * FUNCTION: LBE_CountPeps
@@ -328,21 +294,23 @@ UINT LBE_RevDist(UINT virtID)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_CountPeps(UINT threads, CHAR *filename, STRING modconditions)
+STATUS LBE_CountPeps(UINT threads, STRING filename, STRING modconditions, Index *index)
 {
     STATUS status = SLM_SUCCESS;
-    pepCount = 0;
-    modCount = 0;
-    seqPep.AAs = 0;
     STRING line;
     FLOAT pepmass = 0.0;
+
+    /* Initialize Index parameters */
+    index->pepIndex.AAs = 0;
+    index->pepCount = 0;
+    index->modCount = 0;
 
 #ifndef VMODS
     LBE_UNUSED_PARAM(modconditions);
 #endif /* VMODS */
-
-    /* Open file */
-    ifstream file(filename);
+    
+	/* Open file */
+    file.open(filename);
 
     if (file.is_open())
     {
@@ -363,10 +331,10 @@ STATUS LBE_CountPeps(UINT threads, CHAR *filename, STRING modconditions)
                 pepmass = UTILS_CalculatePepMass((AA *)line.c_str(), line.length());
 
                 /* Check if the peptide mass is legal */
-                if (pepmass > MIN_MASS && pepmass < MAX_MASS)
+                if (pepmass >= MIN_MASS && pepmass <= MAX_MASS)
                 {
-                    pepCount++;
-                    seqPep.AAs += line.length();
+                    index->pepCount++;
+                    index->pepIndex.AAs += line.length();
                     Seqs.push_back(line);
                 }
             }
@@ -383,7 +351,7 @@ STATUS LBE_CountPeps(UINT threads, CHAR *filename, STRING modconditions)
      * modification information */
     if (status == SLM_SUCCESS)
     {
-        modCount = MODS_ModCounter(threads, modconditions);
+        index->modCount = MODS_ModCounter(threads, modconditions);
     }
 
 #endif /* VMODS */
@@ -392,11 +360,13 @@ STATUS LBE_CountPeps(UINT threads, CHAR *filename, STRING modconditions)
     if (status == SLM_SUCCESS)
     {
         /* Return the total count */
-        totalCount = pepCount + modCount;
+        index->totalCount = index->pepCount + index->modCount;
+        cumusize += index->totalCount;
 
-        cout << "Number of Peptides   = \t\t" << pepCount << endl;
-        cout << "Number of Mods       = \t\t" << modCount << endl;
-        cout << "Distributed SPI Size = \t\t" << totalCount << endl << endl;
+        cout << "Number of Peptides    =\t\t" << index->pepCount << endl;
+        cout << "Number of Variants    =\t\t" << index->modCount << endl;
+        cout << "Total Index Size      =\t\t" << index->totalCount << endl;
+        cout << "Cumulative Index Size =\t\t" << cumusize << endl << endl;
 
         /* Close the file once done */
         file.close();

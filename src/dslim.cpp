@@ -19,30 +19,16 @@
  */
 
 #include "dslim.h"
-
-/* Sanity check for CHUNKSIZE */
-#if (CHUNKSIZE <= 0)
-#error "ABORT: The macro CHUNKSIZE must be > 0"
-#endif /* (CHUNKSIZE == 0) */
-
-/* Enternal Variables */
-extern ULONGLONG    pepCount;
-extern ULONGLONG  totalCount;
-extern PepSeqs        seqPep;
+using namespace std;
 
 /* Global Variables */
-SLMindex          dslim; /* DSLIM Index       */
-pepEntry    *pepEntries; /* SLM Peptide Index */
-UINT           *SpecArr; /* Spectra Array     */
+UINT          *SpecArr = NULL; /* Spectra Array     */
+UINT reduce = 0;
 
-#ifdef VMODS
-varEntry    *modEntries; /* SLM Mods Index    */
-#endif /* VMODS */
+#ifdef GENFEATS
+BOOL          *features;
+#endif
 
-/* Global Variables */
-UINT chunksize = CHUNKSIZE;
-UINT lastchunksize = 0;
-UINT nchunks   = 0;
 
 
 /* FUNCTION: DSLIM_Construct
@@ -56,9 +42,10 @@ UINT nchunks   = 0;
  * OUTPUT:
  * @status: status of execution
  */
-STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
+STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo, STRING dirpath, Index *index)
 {
     STATUS status = SLM_SUCCESS;
+    UINT peplen_1 = index->pepIndex.peplen - 1;
 
 #ifdef VMODS
     /* Update gModInfo */
@@ -76,10 +63,10 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
         status = ERR_INVLD_PTR;
     }
 
-    if (status == SLM_SUCCESS)
+    if (status == SLM_SUCCESS && SpecArr == NULL)
     {
         /* Spectra Array (SA) */
-        SpecArr = new UINT[chunksize * iSERIES * F];
+        SpecArr = new UINT[MAX_IONS];
 
         /* Check if Spectra Array has been allocated */
         if (SpecArr == NULL)
@@ -87,24 +74,25 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
             status = ERR_BAD_MEM_ALLOC;
         }
     }
+
     if (status == SLM_SUCCESS)
     {
         /* Allocate memory for SLMChunks and SPI*/
-        status = DSLIM_AllocateMemory(chunksize, nchunks);
+        status = DSLIM_AllocateMemory(index);
 
         /* Construct DSLIM.iA */
         if (status == SLM_SUCCESS)
         {
             /* Distributed SLM Ions Array construction */
-            for (UINT chno = 0; chno < nchunks && status == SLM_SUCCESS; chno++)
+            for (UINT chno = 0; chno < index->nChunks && status == SLM_SUCCESS; chno++)
             {
                 /* Construct each DSLIM chunk in Parallel */
-                status = DSLIM_ConstructChunk(threads, chno);
+                status = DSLIM_ConstructChunk(threads, index, chno);
 
                 /* Apply SLM-Transform on the chunk */
                 if (status == SLM_SUCCESS)
                 {
-                    status = DSLIM_SLMTransform(threads, chno);
+                    status = DSLIM_SLMTransform(threads, index, chno);
                 }
             }
         }
@@ -112,24 +100,26 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
 
     if (status == SLM_SUCCESS)
     {
+        UINT speclen = peplen_1 * MAXz * iSERIES;
+
         /* Construct DSLIM.bA */
 #ifdef _OPENMP
 #pragma omp parallel for num_threads(threads) schedule(static, 1)
 #endif /* _OPENMP */
-        for (UINT chunk_number = 0; chunk_number < nchunks; chunk_number++)
+        for (UINT chunk_number = 0; chunk_number < index->nChunks; chunk_number++)
         {
-            UINT *bAPtr = dslim.pepChunks[chunk_number].bA;
+            UINT *bAPtr = index->ionIndex[chunk_number].bA;
 
             /* Get size of the chunk */
-            UINT csize = ((chunk_number == nchunks - 1) && (nchunks > 1)) ?
-                            lastchunksize                                 :
-                            chunksize;
+            UINT csize = ((chunk_number == index->nChunks - 1) && (index->nChunks > 1)) ?
+                           index->lastchunksize                                 :
+                           index->chunksize;
 
             UINT count = bAPtr[0];
 
             /* Initialize first and last bA entries */
             bAPtr[0] = 0;
-            bAPtr[(MAX_MASS * SCALE)] = (csize * iSERIES * F);
+            bAPtr[(MAX_MASS * SCALE)] = (csize * speclen);
 
             for (UINT li = 1; li <= (MAX_MASS * SCALE); li++)
             {
@@ -148,16 +138,25 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
             }
 
             /* Check if all correctly done */
-            if (bAPtr[(MAX_MASS * SCALE)] != (csize * iSERIES * F))
+            if (bAPtr[(MAX_MASS * SCALE)] != (csize * speclen))
             {
                 status = ERR_INVLD_SIZE;
             }
         }
     }
 
+    /* Optimize DSLIM chunks */
+    if (status == SLM_SUCCESS)
+    {
+        for (UINT chno = 0; chno < index->nChunks; chno++)
+        {
+            status = DSLIM_Optimize(threads, index, chno);
+        }
+    }
+
     /* Remove the temporary SpecArray (SA) */
-    delete[] SpecArr;
-    SpecArr = NULL;
+//    delete[] SpecArr;
+//    SpecArr = NULL;
 
     return status;
 }
@@ -174,36 +173,39 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_AllocateMemory(UINT chsize, UINT Chunks)
+STATUS DSLIM_AllocateMemory(Index *index)
 {
     STATUS status = SLM_SUCCESS;
+    UINT chsize = index->chunksize;
+    UINT Chunks = index->nChunks;
+
+    UINT speclen = ((index->pepIndex.peplen-1) * iSERIES * MAXz);
 
     /* Initialize DSLIM pepChunks */
-    dslim.pepChunks = new SLMchunk[Chunks];
+    index->ionIndex = new SLMchunk[Chunks];
 
-    if (dslim.pepChunks != NULL)
+    if (index->ionIndex != NULL)
     {
-        dslim.nChunks = Chunks;
 
         /* Counter for Chunk size construction */
-        INT totalpeps = (INT) totalCount;
+        INT totalpeps = (INT) index->totalCount;
 
         /* At every loop, check for remaining peps and status */
         for (UINT i = 0; i < Chunks && totalpeps > 0 && status == SLM_SUCCESS; i++)
         {
             /* Initialize direct hashing bA */
-            dslim.pepChunks[i].bA = new UINT[(MAX_MASS * SCALE) + 1];
+            index->ionIndex[i].bA = new UINT[(MAX_MASS * SCALE) + 1];
 
-            if (dslim.pepChunks[i].bA != NULL)
+            if (index->ionIndex[i].bA != NULL)
             {
                 /* Calculate the iA chunk size */
                 INT size = ((INT)(totalpeps - chsize)) > 0 ? chsize : totalpeps;
                 totalpeps -= size; // Update the counter
 
                 /* Total Number of Ions = peps * #ion series * ions/ion series */
-                dslim.pepChunks[i].iA = new UINT[(size * iSERIES * F)];
+                index->ionIndex[i].iA = new UINT[(size * speclen)];
 
-                if (dslim.pepChunks[i].iA == NULL)
+                if (index->ionIndex[i].iA == NULL)
                 {
                     status = ERR_INVLD_MEMORY;
                 }
@@ -222,9 +224,9 @@ STATUS DSLIM_AllocateMemory(UINT chsize, UINT Chunks)
     /* Allocate memory for SPI and Spectra Array */
     if (status == SLM_SUCCESS)
     {
-        pepEntries = new pepEntry[pepCount];
+        index->pepEntries = new pepEntry[index->pepCount];
 
-        if (pepEntries == NULL)
+        if (index->pepEntries == NULL)
         {
             status = ERR_INVLD_MEMORY;
         }
@@ -243,19 +245,22 @@ STATUS DSLIM_AllocateMemory(UINT chsize, UINT Chunks)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
+STATUS DSLIM_ConstructChunk(UINT threads, Index *index, UINT chunk_number)
 {
     STATUS status = SLM_SUCCESS;
+    UINT peplen_1 = index->pepIndex.peplen - 1;
+    UINT peplen   = index->pepIndex.peplen;
+    UINT speclen  = MAXz * iSERIES * peplen_1;
 
     /* Check if this chunk is the last chunk */
-    BOOL lastChunk = (chunk_number == (nchunks - 1))? true: false;
+    BOOL lastChunk = (chunk_number == (index->nChunks - 1))? true: false;
 
 #ifdef _OPENMP
     /* SA ptr for each thread */
     UINT *SAPtrs[threads] = {NULL};
 
     /* Temporary Array needed for Theoretical Spectra */
-    UINT *Spectra = new UINT[threads * MAX_SEQ_LEN * iSERIES * MAXz];
+    UINT *Spectra = new UINT[threads * speclen];
 
     UINT *BAPtrs[threads] = {NULL};
     UINT *bA = new UINT[threads * SCALE * MAX_MASS];
@@ -265,7 +270,7 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
     {
         for (UINT i = 0; i < threads; i++)
         {
-            SAPtrs[i] = Spectra + (i * MAX_SEQ_LEN * iSERIES * MAXz);
+            SAPtrs[i] = Spectra + (i * speclen);
             BAPtrs[i] = bA + (i * SCALE * MAX_MASS);
         }
 
@@ -274,7 +279,7 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
         for (UINT i = 0; i < threads; i++)
         {
             std::memset(BAPtrs[i], 0x0, (SCALE * MAX_MASS * sizeof(UINT)));
-            std::memset(SAPtrs[i], 0x0, (MAX_SEQ_LEN * iSERIES * MAXz * sizeof(UINT)));
+            std::memset(SAPtrs[i], 0x0, (speclen * sizeof(UINT)));
         }
     }
     else
@@ -283,20 +288,20 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
     }
 #else
 
-    UINT SAPtr[(MAX_SEQ_LEN * iSERIES * MAXz)] = {};
-    std::memset(dslim.pepChunks[chunk_number].bA, 0x0, (SCALE * MAX_MASS * sizeof(UINT) + 1));
+    UINT SAPtr[speclen] = {};
+    std::memset(index->ionIndex[chunk_number].bA, 0x0, (((SCALE * MAX_MASS) + 1) * sizeof(UINT)));
 
 #endif /* _OPENMP */
 
     if (status == SLM_SUCCESS)
     {
-        UINT start_idx = chunk_number * chunksize;
-        UINT interval = chunksize;
+        UINT start_idx = chunk_number * index->chunksize;
+        UINT interval = index->chunksize;
 
         /* Check for last chunk */
-        if (lastChunk == true && nchunks > 1)
+        if (lastChunk == true && index->nChunks > 1)
         {
-            interval = lastchunksize;
+            interval = index->lastchunksize;
         }
 
 #ifdef _OPENMP
@@ -305,33 +310,31 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
         for (UINT k = start_idx; k < (start_idx + interval); k++)
         {
             /* Filling point */
-            UINT nfilled = (k - start_idx) * iSERIES * F;
+            UINT nfilled = (k - start_idx) * speclen;
 
 #ifdef _OPENMP
             UINT *Spec = SAPtrs[omp_get_thread_num()];
             UINT *bAPtr  = BAPtrs[omp_get_thread_num()];
 #else
             UINT *Spec = SAPtr;
-            UINT *bAPtr = dslim.pepChunks[chunk_number].bA;
+            UINT *bAPtr = index->ionIndex[chunk_number].bA;
 #endif /* OPENMP */
 
             /* Extract peptide Information */
             FLOAT pepMass = 0.0;
             CHAR *seq = NULL;
-            INT len = 0;
             UINT pepID = LBE_RevDist(k);
 
 #ifdef VMODS
             /* Check if pepID belongs to peps or mods */
-            if (pepID >= pepCount)
+            if (pepID >= index->pepCount)
             {
                 /* Extract from Mods */
-                varEntry *entry = modEntries + (pepID - pepCount);
-                seq = &seqPep.seqs[seqPep.idx[entry->seqID]];
-                len = (INT)seqPep.idx[entry->seqID + 1] - (INT)seqPep.idx[entry->seqID];
+                varEntry *entry = index->modEntries + (pepID - index->pepCount);
+                seq = &index->pepIndex.seqs[entry->seqID * peplen];
 
                 /* Generate the Mod. Theoretical Spectrum */
-                pepMass = UTILS_GenerateModSpectrum(seq, (UINT)len, Spec, entry->sites);
+                pepMass = UTILS_GenerateModSpectrum(seq, (UINT)peplen, Spec, entry->sites);
 
                 /* Fill in the pepMass */
                 entry->Mass = pepMass;
@@ -340,12 +343,11 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
 #endif /* VMODS */
             {
                 /* Extract from Peps */
-                pepEntry *entry = pepEntries + pepID;
-                seq = &seqPep.seqs[seqPep.idx[pepID]];
-                len = (INT)seqPep.idx[pepID + 1] - (INT)seqPep.idx[pepID];
+                pepEntry *entry = index->pepEntries + pepID;
+                seq = &index->pepIndex.seqs[peplen * pepID];
 
                 /* Generate the Theoretical Spectrum */
-                pepMass = UTILS_GenerateSpectrum(seq, len, Spec);
+                pepMass = UTILS_GenerateSpectrum(seq, peplen, Spec);
 
                 /* Fill in the pepMass */
                 entry->Mass = pepMass;
@@ -354,47 +356,21 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
             /* If a legal peptide */
             if (pepMass >= MIN_MASS && pepMass <= MAX_MASS)
             {
-                /* Calculate the length/2 of Spec */
-                UINT half_len = ((iSERIES * MAX_SEQ_LEN * MAXz) / 2);
-
                 /* Sort by ion Series and Mass */
-                UTILS_Sort<UINT>(Spec, half_len, false);
-                UTILS_Sort<UINT>((Spec + half_len), half_len, false);
+//                UTILS_Sort<UINT>(Spec, half_len, false);
+//                UTILS_Sort<UINT>((Spec + half_len), half_len, false);
 
-                /* Choose SpecArr filling method */
-                UINT nIons = (len - 1) * MAXz;
-                UINT maxfill = F;
-                UINT fill = 0;
-
-                /* Fill the sorted ions */
-                for (fill = 0; fill < nIons && fill < maxfill; fill++)
+                /* Fill the ions */
+                for (UINT ion = 0; ion < speclen; ion++)
                 {
                     /* Check if legal b-ion */
-                    if (Spec[half_len - nIons + fill] >= (MAX_MASS * SCALE))
+                    if (Spec[ion] >= (MAX_MASS * SCALE))
                     {
-                        Spec[half_len - nIons + fill] = (MAX_MASS * SCALE) - 1;
+                        Spec[ion] = (MAX_MASS * SCALE) - 1;
                     }
 
-                    SpecArr[nfilled + fill] = Spec[half_len - nIons + fill]; // Fill in the b-ion
-                    bAPtr[SpecArr[nfilled + fill]]++; // Update the BA counter
-
-                    /* Check for a legal y-ion */
-                    if (Spec[(2 * half_len) - nIons + fill] >= (MAX_MASS * SCALE))
-                    {
-                        Spec[(2 * half_len) - nIons + fill] = (MAX_MASS * SCALE) - 1;
-                    }
-
-                    SpecArr[nfilled + F + fill] = Spec[(2 * half_len) - nIons + fill]; // Fill in the y-ion
-                    bAPtr[SpecArr[nfilled + F + fill]]++; // Update the BA counter
-
-                }
-
-                /* Fill the rest with zeros */
-                for (; fill < maxfill; fill++)
-                {
-                    SpecArr[nfilled + fill] = 0; // Fill in the b-ion
-                    SpecArr[nfilled + F + fill] = 0; // Fill in the y-ion
-                    bAPtr[0] += 2; // Update the BA counter
+                    SpecArr[nfilled + ion] = Spec[ion]; // Fill in the b-ion
+                    bAPtr[SpecArr[nfilled + ion]]++; // Update the BA counter
                 }
             }
 
@@ -405,8 +381,8 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
                  * FIXME: Should not be filled into the chunk
                  *        and be removed from SPI as well
                  */
-                std::memset(&SpecArr[nfilled], 0x0, sizeof(UINT) * iSERIES * F);
-                bAPtr[0] += (iSERIES * F); // Update the BA counter
+                std::memset(&SpecArr[nfilled], 0x0, sizeof(UINT) * speclen);
+                bAPtr[0] += speclen; // Update the BA counter
             }
         }
 
@@ -415,11 +391,11 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
         for (UINT i = 0; i < (MAX_MASS * SCALE); i++)
         {
             /* Initialize to zero */
-            dslim.pepChunks[chunk_number].bA[i] = 0;
+            index->ionIndex[chunk_number].bA[i] = 0;
 
             for (UINT j = 0; j < threads; j++)
             {
-                dslim.pepChunks[chunk_number].bA[i] += BAPtrs[j][i];
+                index->ionIndex[chunk_number].bA[i] += BAPtrs[j][i];
             }
         }
 #endif /* _OPENMP */
@@ -446,20 +422,21 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_SLMTransform(UINT threads, UINT chunk_number)
+STATUS DSLIM_SLMTransform(UINT threads, Index *index, UINT chunk_number)
 {
     STATUS status = SLM_SUCCESS;
 
     /* Check if this chunk is the last chunk */
-    UINT size = ((chunk_number == nchunks - 1) && (nchunks > 1))?
-                 lastchunksize                                  :
-                 chunksize;
+    UINT size = ((chunk_number == index->nChunks - 1) && (index->nChunks > 1))?
+                 index->lastchunksize                                  :
+                 index->chunksize;
 
-    UINT *iAPtr = dslim.pepChunks[chunk_number].iA;
-    UINT iAsize = size * iSERIES * F;
+    UINT speclen = (index->pepIndex.peplen - 1) * MAXz * iSERIES;
+    UINT *iAPtr = index->ionIndex[chunk_number].iA;
+    UINT iAsize = size * speclen;
 
 #ifdef VALIDATE_SLM
-    UINT *integ = new UINT[size * iSERIES * F];
+    UINT *integ = new UINT[size * speclen];
     std::memcpy(integ, SpecArr, sizeof(UINT) * iAsize);
 #endif /* VALIDATE_SLM */
 
@@ -505,70 +482,110 @@ STATUS DSLIM_SLMTransform(UINT threads, UINT chunk_number)
 }
 
 /*
- * FUNCTION: DSLIM_InitializeSC
+ * FUNCTION: DSLIM_Optimize
  *
- * DESCRIPTION: Initialize Scorecard for DSLIM
+ * DESCRIPTION: Optimization of the index
  *
  * INPUT:
- * @threads: Number of parallel threads
+ * @threads     : Number of parallel threads
+ * @index       : The SLM Index
+ * @chunk_number: Chunk Index
  *
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_InitializeSC(UINT threads)
+STATUS DSLIM_Optimize(UINT threads, Index *index, UINT chunk_number)
 {
     STATUS status = SLM_SUCCESS;
 
-    UINT chunk_number = 0;
+    UINT *bAPtr = index->ionIndex[chunk_number].bA;
+    UINT *iAPtr = index->ionIndex[chunk_number].iA;
 
-#ifndef _OPENMP
-    threads = 1;
-#endif /* OPENMP */
+#ifdef OPTIMIZE
+    UINT *chPtr = new UINT[(MAX_MASS * SCALE)+1];
+    std::memset(chPtr, 0x0, (sizeof(UINT) * (MAX_MASS * SCALE)+1));
+    UINT speclen = MAXz * (index->pepIndex.peplen - 1) * iSERIES;
+#endif /* OPTIMIZE */
 
-    /* Loop through all the chunks */
+    /* Stablize the entries in iAPtr */
 #ifdef _OPENMP
-#pragma omp parallel for num_threads(threads) schedule(static)
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 50 * SCALE)
 #endif /* _OPENMP */
-    for (chunk_number = 0; chunk_number < threads; chunk_number++)
+    for (UINT kk = 0; kk < (MAX_MASS * SCALE); kk++)
     {
-        /* Check if this chunk is the last chunk */
-        UINT size = chunksize;
-#ifdef FUTURE
-        /* Calculate the size of bits */
-        UINT bitsize = (size/BYTE) + 1;
-#endif /* FUTURE */
+        UINT offset = bAPtr[kk];
+        UINT size = bAPtr[kk + 1] - offset;
 
-        /* Allocate memory for scorecard */
-        UCHAR *SC = new UCHAR[size];
-        dslim.pepChunks[chunk_number].sC = SC;
-
-        if (SC != NULL)
+        if (size > 1)
         {
-            std::memset(SC, 0x0, size);
-#ifndef FUTURE
-#else
-            /* Allocate memory for bitmask */
-            UCHAR *bits = new UCHAR[bitsize];
+            /* Stablize the KeyVal Sort */
+            UTILS_Sort<UINT>((iAPtr + offset), size, false);
+        }
 
-            if (bits != NULL)
+    }
+
+#ifdef OPTIMIZE
+    /* For each ionEntries, do the following, check for groups >= 10,
+     * Group = ion1, ion1 + peplen, ion1 + 2peplen, ion1+ 3peplen so on
+     * Replace group by CELLBLOCK, cell header, size
+     * Update the bAPtr size
+     */
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 50 * SCALE)
+#endif /* _OPENMP */
+    for (UINT i = 0; i < (MAX_MASS * SCALE); i++)
+    {
+        UINT start = bAPtr[i];
+        UINT end =   bAPtr[i+1];
+
+        UINT nions = end - start;
+
+        /* If less than 500 occurrences, then continue */
+        if (nions < 500)
+        {
+            continue;
+        }
+
+        /* Otherwise*/
+        UINT fion = start;
+        UINT group = 1;
+
+        for (UINT kk = start + 1; kk < end; kk++)
+        {
+
+            if (iAPtr[kk] < (iAPtr[fion] + (group * speclen)))
             {
-                /* Set the bitmask to zero */
-                std::memset(bits, 0x0, bitsize);
-
-                /* Set the pointers */
-                dslim.pepChunks[chunk_number].bits = bits;
+                iAPtr[kk] = -1;
+                reduce += 1;
+            }
+            else if (iAPtr[kk] == (iAPtr[fion] + (group * speclen)))
+            {
+                iAPtr[kk] = -1;
+                group++;
             }
             else
             {
-                status = ERR_INVLD_MEMORY;
+                if (group >= 10)
+                {
+                    iAPtr[fion + 1] = iAPtr[fion];
+                    iAPtr[fion+2] = group;
+                    iAPtr[fion] = CELLBLOCK;
+
+                    chPtr[i+1] += group - 3;
+                    reduce += group -2;
+                }
+
+                fion = kk;
+                group = 1;
+
             }
-#endif /* FUTURE */
-        }
-        else
-        {
-            status = ERR_INVLD_MEMORY;
         }
     }
+
+    delete[] chPtr;
+    chPtr = NULL;
+    std::cout << "Compression Achieved: " << reduce * 4.0/(1024*1024) << "MiB" << std::endl;
+#endif /* OPTIMIZE */
 
     return status;
 }
@@ -586,6 +603,7 @@ STATUS DSLIM_InitializeSC(UINT threads)
  * OUTPUT:
  * @status: Status of execution
  */
+#if 0
 STATUS DSLIM_Analyze(UINT threads, DOUBLE &avg, DOUBLE &std)
 {
     STATUS status = SLM_SUCCESS;
@@ -726,6 +744,8 @@ STATUS DSLIM_Analyze(UINT threads, DOUBLE &avg, DOUBLE &std)
     return status;
 }
 
+#endif
+
 /*
  * FUNCTION: DSLIM_Deinitialize
  *
@@ -736,12 +756,16 @@ STATUS DSLIM_Analyze(UINT threads, DOUBLE &avg, DOUBLE &std)
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_Deinitialize(VOID)
+STATUS DSLIM_Deinitialize(Index *index)
 {
+    STATUS status = SLM_SUCCESS;
+
+    status = DSLIM_DeallocateSC();
+
     /* Deallocate all the DSLIM chunks */
-    for (UINT chno = 0; chno < dslim.nChunks; chno++)
+    for (UINT chno = 0; chno < index->nChunks; chno++)
     {
-        SLMchunk curr_chunk = dslim.pepChunks[chno];
+        SLMchunk curr_chunk = index->ionIndex[chno];
 
         if (curr_chunk.bA != NULL)
         {
@@ -755,25 +779,361 @@ STATUS DSLIM_Deinitialize(VOID)
             curr_chunk.iA = NULL;
         }
 
-        if (curr_chunk.sC != NULL)
-        {
-            delete[] curr_chunk.sC;
-            curr_chunk.sC = NULL;
-        }
     }
 
-    if (dslim.pepChunks != NULL)
+    if (index->ionIndex != NULL)
     {
-        delete[] dslim.pepChunks;
+        delete[] index->ionIndex;
+        index->ionIndex = NULL;
     }
 
-    /* Reset Global Variables */
-    nchunks = 0;
-    dslim.modChunks = 0;
-    dslim.pepChunks = 0;
-    dslim.nChunks = 0;
-    chunksize = 0;
-    lastchunksize = 0;
+    if (index->pepEntries != NULL)
+    {
+        delete[] index->pepEntries;
+        index->pepEntries = NULL;
+    }
+
+#ifdef VMODS
+    if (index->modEntries != NULL)
+    {
+        delete[] index->modEntries;
+        index->modEntries = NULL;
+    }
+#endif /* VMODS */
+
+    if (index->pepIndex.seqs != NULL)
+    {
+        delete[] index->pepIndex.seqs;
+        index->pepIndex.seqs = NULL;
+    }
+
+    /* Reset Index Variables */
+    index->nChunks = 0;
+    index->pepCount = 0;
+    index->modCount = 0;
+    index->totalCount = 0;
+    index->chunksize = 0;
+    index->lastchunksize = 0;
+
+    index->pepIndex.AAs = 0;
+    index->pepIndex.peplen = 0;
+
+    return status;
+}
+
+STATUS DSLIM_DeallocateSpecArr(VOID)
+{
+    if (SpecArr != NULL)
+    {
+        delete[] SpecArr;
+        SpecArr= NULL;
+    }
 
     return SLM_SUCCESS;
 }
+#if 0
+/* FUNCTION: DSLIM_WriteLIBSVM
+ *
+ * DESCRIPTION: Write the MS/MS spectra data in libsvm format
+ *
+ * INPUT:
+ * @path   : Path for output data
+ * @chno   : Chunk number
+ *
+ * OUTPUT:
+ * @status: Status of execution
+ */
+STATUS DSLIM_WriteLIBSVM(STRING path, UINT peplen, UINT chno)
+{
+    STATUS status = SLM_SUCCESS;
+
+#ifdef GENDATA
+    ofstream file;
+#endif
+
+#ifdef GENFEATS
+    ofstream ffile;
+#endif
+
+#ifdef GENBA
+    ofstream bAfile;
+#endif
+
+    UINT peplen_1 = peplen - 1;
+
+#ifdef GENDATA
+    /* Create the filename string */
+    STRING filename = path + std::to_string(peplen) + "_" + std::to_string(chno) + ".libsvm";
+#endif
+
+#ifdef GENBA
+    STRING bAfname  = path + "bA" + std::to_string(peplen) + "_" + std::to_string(chno) + ".csv";
+#endif
+
+#ifdef GENFEATS
+    STRING ffname = path + "fA" + std::to_string(peplen) + "_" + std::to_string(chno) + ".csv";
+#endif
+
+    /* Check if this chunk is the last chunk */
+    BOOL lastChunk = (chno == (index->nChunks - 1))? true: false;
+
+#ifdef GENDATA
+    /* Do not apply the append flag in here */
+    file.open((const CHAR *) filename.c_str(), std::ofstream::out);
+#endif
+
+#ifdef GENBA
+    bAfile.open((const CHAR *) bAfname.c_str(), std::ofstream::out);
+#endif
+
+#ifdef GENFEATS
+    ffile.open((const CHAR *) ffname.c_str(), std::ofstream::out);
+#endif
+
+    if (status == SLM_SUCCESS)
+    {
+        UINT start = chno * chunksize;
+        UINT interval = chunksize;
+
+        /* Check for last chunk */
+        if (lastChunk == true && nchunks > 1)
+        {
+            interval = lastchunksize;
+        }
+
+#ifdef GENDATA
+        for (UINT k = start; k < (start + interval); k++)
+        {
+            /* Filling point */
+            UINT nfilled = (k - start) * (iSERIES * peplen_1 * MAXz);
+            UINT fsize = (iSERIES * peplen_1 * MAXz);
+            UINT bl = 0, yl = 0;
+            UINT feat = 0;
+
+            STRING line = std::to_string(k);
+
+            for (UINT z = 0; z < MAXz; z++)
+            {
+                for (bl = 1; bl <= B_FEATURES; bl++)
+                {
+                    line += " " + std::to_string(feat) + ":"
+                            + std::to_string(SpecArr[chno][nfilled + bl - 1]);
+                    feat++;
+                }
+            }
+
+            for (UINT z = 0; z < MAXz; z++)
+            {
+                for (yl = B_FEATURES + 1; yl <= (B_FEATURES + Y_FEATURES); yl++)
+                {
+                    line += " " + std::to_string(feat) + ":"
+                         + std::to_string(SpecArr[chno][nfilled + (int) (fsize / 2)
+                                          + yl - B_FEATURES - 1]);
+                    feat++;
+                }
+            }
+
+            line += "\n";
+
+            file << line;
+        }
+#endif
+
+#ifdef GENBA
+        STRING line = std::to_string(0);
+
+        line += "," + std::to_string(0);
+        line += "\n";
+
+        bAfile << line;
+
+        for (UINT k = 1; k <= (MAX_MASS * SCALE) + 1; k++)
+        {
+            STRING line = std::to_string(k);
+
+            line += "," + std::to_string(bAPtr[k]);
+            line += "\n";
+
+            bAfile << line;
+        }
+#endif
+
+#ifdef GENFEATS
+        for (UINT k = 1; k <= (iSERIES *peplen_1 * MAXz); k++)
+        {
+            UINT sum = 0;
+
+            ffile << std::to_string(k) + ",";
+
+            for (UINT ll = 0; ll < (MAX_MASS * SCALE); ll++)
+            {
+                sum += (CHAR)features[(k-1) * (MAX_MASS * SCALE) + ll];
+            }
+
+            ffile << std::to_string(sum) + "\n";
+        }
+#endif
+
+    }
+
+
+
+    return status;
+}
+
+/* FUNCTION: DSLIM_WriteLIBSVM
+ *
+ * DESCRIPTION: Write the MS/MS spectra data in libsvm format
+ *
+ * INPUT:
+ * @path   : Path for output data
+ * @chno   : Chunk number
+ *
+ * OUTPUT:
+ * @status: Status of execution
+ */
+STATUS DSLIM_WriteCSV(STRING path, UINT peplen, UINT chno)
+{
+    STATUS status = SLM_SUCCESS;
+
+#ifdef GENDATA
+    ofstream file;
+#endif
+
+#ifdef GENFEATS
+    ofstream ffile;
+#endif
+
+#ifdef GENBA
+    ofstream bAfile;
+#endif
+
+    UINT peplen_1 = peplen - 1;
+    UINT *bAPtr = dslim.pepChunks[chno].bA;
+
+#ifdef GENDATA
+    /* Create the filename string */
+    STRING filename = path + std::to_string(peplen) + "_" + std::to_string(chno) + ".csv";
+#endif
+
+#ifdef GENBA
+    STRING bAfname  = path + "bA" + std::to_string(peplen) + "_" + std::to_string(chno) + ".csv";
+#endif
+
+#ifdef GENFEATS
+    STRING ffname = path + "fA" + std::to_string(peplen) + "_" + std::to_string(chno) + ".csv";
+#endif
+    /* Check if this chunk is the last chunk */
+    BOOL lastChunk = (chno == (nchunks - 1))? true: false;
+
+#ifdef GENDATA
+    /* Do not apply the append flag in here */
+    file.open((const CHAR *) filename.c_str(), std::ofstream::out);
+#endif
+
+#ifdef GENBA
+    bAfile.open((const CHAR *) bAfname.c_str(), std::ofstream::out);
+#endif
+
+#ifdef GENFEATS
+    ffile.open((const CHAR *) ffname.c_str(), std::ofstream::out);
+#endif
+
+    if (status == SLM_SUCCESS)
+    {
+        UINT start = chno * chunksize;
+        UINT interval = chunksize;
+
+        /* Check for last chunk */
+        if (lastChunk == true && nchunks > 1)
+        {
+            interval = lastchunksize;
+        }
+
+#ifdef GENDATA
+        for (UINT k = start; k < (start + interval); k++)
+        {
+            /* Filling point */
+            UINT nfilled = (k - start) * (iSERIES * peplen_1 * MAXz);
+            UINT fsize = (iSERIES * peplen_1 * MAXz);
+            UINT bl = 0, yl = 0;
+
+            STRING line = std::to_string(SpecArr[chno][nfilled]);
+
+            for (UINT z = 0; z < MAXz; z++)
+            {
+                for (bl = 1; bl < B_FEATURES; bl++)
+                {
+                    line += "," + std::to_string(SpecArr[chno][nfilled + bl]);
+                }
+            }
+
+            for (UINT z = 0; z < MAXz; z++)
+            {
+                for (yl = B_FEATURES; yl < (B_FEATURES + Y_FEATURES); yl++)
+                {
+                    line += "," + std::to_string(SpecArr[chno][nfilled + (int) (fsize / 2)
+                                                               + yl - B_FEATURES]);
+                }
+            }
+
+            line += "\n";
+
+            file << line;
+        }
+#endif
+
+#ifdef GENBA
+        STRING line = std::to_string(0);
+
+        line += "," + std::to_string(0);
+        line += "\n";
+
+        bAfile << line;
+
+        for (UINT k = 1; k <= (MAX_MASS * SCALE) + 1; k++)
+        {
+            STRING line = std::to_string(k);
+
+            line += "," + std::to_string(bAPtr[k]);
+            line += "\n";
+
+            bAfile << line;
+        }
+#endif
+
+#ifdef GENFEATS
+        for (UINT k = 1; k <= (iSERIES *peplen_1 * MAXz); k++)
+        {
+            UINT sum = 0;
+
+            ffile << std::to_string(k) + ",";
+
+            for (UINT ll = 0; ll < (MAX_MASS * SCALE); ll++)
+            {
+                sum += (CHAR)features[(k-1)* (MAX_MASS * SCALE) + ll];
+            }
+
+            ffile << std::to_string(sum) + "\n";
+        }
+#endif
+    }
+
+    if (status == SLM_SUCCESS)
+    {
+#ifdef GENDATA
+        file.close();
+#endif
+
+#ifdef GENBA
+        bAfile.close();
+#endif
+
+#ifdef GENFEATS
+        ffile.close();
+#endif
+    }
+
+    return status;
+}
+#endif /* 0 */

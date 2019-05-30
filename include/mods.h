@@ -57,4 +57,4 @@ LONGLONG  MODS_ModCounter(UINT threads, STRING conditions);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS MODS_GenerateMods(UINT threads, UINT modCount, STRING conditions);
+STATUS MODS_GenerateMods(UINT threads, UINT modCount, STRING conditions, varEntry *idx);

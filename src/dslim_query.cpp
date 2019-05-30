@@ -1,5 +1,5 @@
 /*
- * This file is part of SLM-Transform
+ * This file is part of Load Balancing Algorithm for DSLIM
  *  Copyright (C) 2019  Muhammad Haseeb, Fahad Saeed
  *  Florida International University, Miami, FL
  *
@@ -25,9 +25,6 @@
 #error "ERROR: The fragment mass tolerance must be > 0"
 #endif /* (dF <= 0) */
 
-/* External Variables */
-extern SLMindex          dslim; /* DSLIM Index       */
-
 #ifdef FUTURE
 extern pepEntry    *pepEntries; /* SLM Peptide Index */
 extern PepSeqs          seqPep; /* Peptide sequences */
@@ -37,7 +34,8 @@ extern varEntry    *modEntries;
 #endif /* FUTURE */
 
 /* Global Variables */
-extern UINT chunksize;
+#define SCSIZE              10000000
+UCHAR *sCArr = NULL;
 
 /* FUNCTION: DSLIM_QuerySpectrum
  *
@@ -53,46 +51,62 @@ extern UINT chunksize;
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_QuerySpectrum(UINT *QA, UINT len, UINT *Matches, UINT threads)
+STATUS DSLIM_QuerySpectrum(UINT *QA, UINT len, ULONGLONG &Matches, UINT threads, Index *index, UINT idxchunk)
 {
     STATUS status = SLM_SUCCESS;
-    UINT chunk_number = 0;
     UINT *QAPtr = NULL;
 
-#ifndef _OPENMP
-    threads = 1;
-#endif /* _OPENMP */
-
-        /* Query each chunk in parallel */
 #ifdef _OPENMP
-#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    if (sCArr == NULL)
+    {
+        sCArr = new UCHAR[SCSIZE * threads];
+        std::memset(sCArr, 0x0, sizeof(UCHAR) * SCSIZE * threads);
+    }
+#else
+    if (sCArr == NULL)
+    {
+        sCArr = new UCHAR[SCSIZE];
+        std::memset(sCArr, 0x0, sizeof(UCHAR) * SCSIZE);
+    }
+
 #endif /* _OPENMP */
-        /* Process all the queries in the chunk */
-        for (UINT queries = 0; queries < len; queries++)
+
+    if (sCArr == NULL)
+    {
+        return ERR_BAD_MEM_ALLOC;
+    }
+
+#ifdef _OPENMP
+#pragma omp parallel  num_threads(threads)
+{
+    UINT threadMatches = 0;
+
+#pragma omp for schedule(dynamic, 10) private(threadMatches)
+#endif
+    /* Process all the queries in the chunk */
+    for (UINT queries = 0; queries < len; queries++)
+    {
+        /* Pointer to each query spectrum */
+        QAPtr = QA + (queries * QALEN);
+
+#ifdef _OPENMP
+        UCHAR *SCPtr = sCArr + (omp_get_thread_num() * SCSIZE);
+#else
+        UCHAR *SCPtr  = sCArr;
+#endif
+
+        for (UINT ixx = 0; ixx < idxchunk; ixx++)
         {
-            /* Pointer to each query spectrum */
-            QAPtr = QA + (queries * QALEN);
+            UINT speclen = (index[ixx].pepIndex.peplen - 1) * MAXz * iSERIES;
 
-            UCHAR *SCPtr = dslim.pepChunks[omp_get_thread_num()].sC;
-
-            /* Check if this chunk is the last chunk */
-            UINT size = chunksize;
-
-			UINT localMatches = 0;
-							
-            /* Query each chunk in parallel */
-            for (chunk_number = 0; chunk_number < dslim.nChunks; chunk_number++)
+            for (UINT chno = 0; chno < index[ixx].nChunks; chno++)
             {
-                UINT *bAPtr = dslim.pepChunks[chunk_number].bA;
-                UINT *iAPtr = dslim.pepChunks[chunk_number].iA;
+                /* Query each chunk in parallel */
+                UINT *bAPtr = index[ixx].ionIndex[chno].bA;
+                UINT *iAPtr = index[ixx].ionIndex[chno].iA;
 
-#ifdef FUTURE
-
-                UCHAR *bits = dslim.pepChunks[chunk_number].bits;
-                /* Calculate the size of bits */
-                UINT bitsize = (size/BYTE) + 1;
-
-#endif /* FUTURE */
+                /* Check if this chunk is the last chunk */
+                UINT size = index[ixx].chunksize;
 
                 /* Query all fragments in each spectrum */
                 for (UINT k = 0; k < QALEN; k++)
@@ -112,50 +126,58 @@ STATUS DSLIM_QuerySpectrum(UINT *QA, UINT len, UINT *Matches, UINT threads)
                     for (UINT ion = start; ion < end; ion++)
                     {
                         /* Calculate parent peptide ID */
-                        UINT ppid = (iAPtr[ion] / (2 * F));
+                        UINT ppid = (iAPtr[ion] / speclen);
 
-#ifdef FUTURE
-                        if (IS_INIT(bits[ppid], ppid))
-                        {
-                            SC[ppid]++;
-                        }
-                        else
-                        {
-                            INIT(bits[ppid], ppid);
-                            SC[ppid] = 1;
-                        }
-#else
                         /* Update corresponding SC entry */
                         SCPtr[ppid] += 1;
-#endif /* FUTURE */
+
                     }
                 }
 
-                /* Put the candidate peptides
+                /* Count the number of candidate peptides
                  * from each chunk
                  */
-                for (UINT cntr = 0; cntr < size && localMatches < MAXMATCHES; cntr++)
+                UINT localMatches = 0;
+
+                for (UINT cntr = 0; cntr < size; cntr++)
                 {
                     if (SCPtr[cntr] >= MIN_SHRD_PKS)
                     {
-                        /* Avoid too many updates to the Matches */
-                        Matches[(queries * MAXMATCHES)+ localMatches] = cntr;
-
-                        /* Fill in the matches here or just count them */
                         localMatches++;
-
                     }
                 }
-            }
-#ifdef FUTURE
-                /* Clear the bitmask */
-                std::memset(bits, 0x0, bitsize);
-#else
+
+                /* Avoid too many updates to the Matches */
+                threadMatches += localMatches;
+
                 /* bitmask not active,
                  * reset the SC instead */
                 std::memset(SCPtr, 0x0, size);
-#endif /* FUTURE */
+            }
         }
+    }
+
+#ifdef _OPENMP
+#pragma omp atomic
+    Matches += threadMatches;
+#else
+    Matches += threadMatches;
+#endif
+
+        
+
+}
 
     return status;
+}
+
+STATUS DSLIM_DeallocateSC(VOID)
+{
+    if (sCArr != NULL)
+    {
+        delete[] sCArr;
+        sCArr = NULL;
+    }
+
+    return SLM_SUCCESS;
 }

@@ -73,7 +73,7 @@ typedef struct _SLM_Mods
             this->vmods_per_pep = rhs.vmods_per_pep;
             this->num_vars = rhs.num_vars;
 
-            for (UINT i = 0; i < MIN(num_vars, 7); i++)
+            for (UINT i = 0; i < MAX_MOD_TYPES; i++)
             {
                 this->vmods[i] = rhs.vmods[i];
             }
@@ -86,15 +86,15 @@ typedef struct _SLM_Mods
 
 typedef struct _pepSeq
 {
-    AA    *seqs; /* Stores peptide sequence, could store as strings as well */
-    UINT   *idx; /* Stores sequence length */
-    UINT    AAs; /* Total number of characters */
+    AA        *seqs = NULL; /* Stores peptide sequence, could store as strings as well */
+    USHORT   peplen    = 0; /* Stores sequence length */
+    UINT        AAs    = 0; /* Total number of characters */
 } PepSeqs;
 
 typedef struct _modAA
 {
-    ULONG  sites = 0x0; /* maxlen(pep) = 60AA + 2 bits (termini mods)      */
-    UINT  modNum = 0x0; /* 4 bits per mods num, Max 8 mods allowed per pep */
+    ULONGLONG  sites = 0x0; /* maxlen(pep) = 60AA + 2 bits (termini mods)      */
+    UINT  modNum =     0x0; /* 4 bits per mods num, Max 8 mods allowed per pep */
 
     /* Overload = operator */
     _modAA& operator=(const _modAA& rhs)
@@ -136,6 +136,92 @@ typedef struct _varEntry
         return *this;
     }
 
+    BOOL operator>(const _varEntry& rhs)
+    {
+        INT s1 = 0;
+        INT s2 = 0;
+
+        while ((this->sites.sites >> s1 & 0x1) != 0x1 && s1++ < MAX_SEQ_LEN);
+        while ((rhs.sites.sites   >> s2 & 0x1) != 0x1 && s2++ < MAX_SEQ_LEN);
+
+        /* distance from n-term is the same */
+        if (s1 == s2)
+        {
+            /* compute distance from c-term */
+            INT s3= MAX_SEQ_LEN;
+            INT s4= MAX_SEQ_LEN;
+
+            while ((this->sites.sites >> s3 & 0x1) != 0x1 && s3-- > s1);
+            while ((rhs.sites.sites   >> s4 & 0x1) != 0x1 && s4-- > s2);
+
+            /* return which has larger distance */
+            return s3 < s4;
+        }
+
+        return s1 > s2;
+
+    }
+
+    BOOL operator>=(const _varEntry& rhs)
+    {
+        INT s1 = 0;
+        INT s2 = 0;
+
+        while ((this->sites.sites >> s1 & 0x1) != 0x1 && s1++ < MAX_SEQ_LEN);
+        while ((rhs.sites.sites   >> s2 & 0x1) != 0x1 && s2++ < MAX_SEQ_LEN);
+
+        return s1 >= s2;
+
+    }
+
+    BOOL operator<(const _varEntry& rhs)
+    {
+        INT s1 = 0;
+        INT s2 = 0;
+
+        while ((this->sites.sites >> s1 & 0x1) != 0x1 && s1++ < MAX_SEQ_LEN);
+        while ((rhs.sites.sites   >> s2 & 0x1) != 0x1 && s2++ < MAX_SEQ_LEN);
+
+        /* distance from n-term is the same */
+        if (s1 == s2)
+        {
+            /* compute distance from c-term */
+            INT s3= MAX_SEQ_LEN;
+            INT s4= MAX_SEQ_LEN;
+
+            while ((this->sites.sites >> s3 & 0x1) != 0x1 && s3-- > s1);
+            while ((rhs.sites.sites   >> s4 & 0x1) != 0x1 && s4-- > s2);
+
+            /* return which has larger distance */
+            return s3 > s4;
+        }
+
+        return s1 < s2;
+    }
+
+    BOOL operator<=(const _varEntry& rhs)
+    {
+
+        INT s1 = 0;
+        INT s2 = 0;
+
+        while ((this->sites.sites >> s1 & 0x1) != 0x1 && s1++ < MAX_SEQ_LEN);
+        while ((rhs.sites.sites   >> s2 & 0x1) != 0x1 && s2++ < MAX_SEQ_LEN);
+
+        return s1 <= s2;
+    }
+
+    BOOL operator==(const _varEntry& rhs)
+    {
+        INT s1 = 0;
+        INT s2 = 0;
+
+        while ((this->sites.sites >> s1 & 0x1) != 0x1 && s1++ < MAX_SEQ_LEN);
+        while ((rhs.sites.sites   >> s2 & 0x1) != 0x1 && s2++ < MAX_SEQ_LEN);
+
+        return s1 == s2;
+    }
+
     /* Default constructor */
     _varEntry()
     {
@@ -152,21 +238,27 @@ typedef struct _SLMchunk
 {
     UINT    *iA = NULL; /* Ions Array (iA)   */
     UINT    *bA = NULL; /* Bucket Array (bA) */
-    UCHAR   *sC = NULL; /* Scorecard (SC)    */
 #ifdef FUTURE
     UCHAR *bits = NULL; /* Scorecard bits    */
 #endif /* FUTURE */
 } SLMchunk;
 
-typedef struct _SLMindex
+/* Structure for each pep file */
+typedef struct _Index
 {
-    UINT       nPepChunks =    0; /* Number of pep chunks         */
-    UINT       nModChunks =    0; /* Number of mod chunks         */
-    UINT          nChunks =    0; /* Total Number of chunks       */
-    SLMchunk   *pepChunks = NULL; /* Chunks for normal peptides   */
-    SLMchunk   *modChunks = NULL; /* Chunks for modified peptides */
-} SLMindex;
-
+    UINT pepCount         = 0;
+    UINT modCount         = 0;
+    UINT totalCount       = 0;
+    UINT nChunks          = 0;
+    UINT chunksize        = 0;
+    UINT lastchunksize    = 0;
+    PepSeqs          pepIndex;
+    pepEntry      *pepEntries;
+#ifdef VMODS
+    varEntry      *modEntries; /* SLM Mods Index    */
+#endif /* VMODS */
+    SLMchunk        *ionIndex;
+} Index;
 
 /************************* SLM Query DSTs ************************/
 typedef struct _Query

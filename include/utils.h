@@ -31,9 +31,9 @@
 #include "slm_dsts.h"
 #include "keyval.h"
 
-#define BITSET(x, bit)                      ((x) |  (1 << (bit)))
-#define BITCLR(x, bit)                      ((x) & ~(1 << (bit)))
-#define ISBITSET(x,bit)                     ((x) &  (1 << (bit)))
+#define BITSET(x, bit)                      ((x) |  ((ULONGLONG)((ULONGLONG)1 << (bit)))
+#define BITCLR(x, bit)                      ((x) & ~((ULONGLONG)((ULONGLONG)1 << (bit)))
+#define ISBITSET(x,bit)                     ((x) &  ((ULONGLONG)((ULONGLONG)1 << (bit))))
 
 
 /*

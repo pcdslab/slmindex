@@ -46,7 +46,7 @@
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Initialize(UINT threads, STRING modconditions);
+STATUS LBE_Initialize(UINT threads, STRING modconditions, Index *index);
 
 /*
  * FUNCTION: LBE_Deinitialize
@@ -59,7 +59,7 @@ STATUS LBE_Initialize(UINT threads, STRING modconditions);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Deinitialize(VOID);
+STATUS LBE_Deinitialize(Index *index);
 
 /*
  * FUNCTION: LBE_Distribute
@@ -74,7 +74,7 @@ STATUS LBE_Deinitialize(VOID);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_Distribute(UINT threads, DistPolicy policy, UINT& slm_chunks);
+STATUS LBE_Distribute(UINT threads, DistPolicy policy, Index *index);
 
 /*
  * FUNCTION: LBE_RevDist
@@ -87,7 +87,7 @@ STATUS LBE_Distribute(UINT threads, DistPolicy policy, UINT& slm_chunks);
  * OUTPUT:
  * @realID: Actual SPI peptide ID
  */
-UINT LBE_RevDist(UINT virtID);
+#define LBE_RevDist(virtID)                  (virtID)
 
 /*
  * FUNCTION: LBE_CountPeps
@@ -103,7 +103,7 @@ UINT LBE_RevDist(UINT virtID);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS LBE_CountPeps(UINT threads, CHAR *filename, STRING modconditions);
+STATUS LBE_CountPeps(UINT threads, STRING filename, STRING modconditions, Index *index);
 
 /*
  * FUNCTION: LBE_PrintHeader

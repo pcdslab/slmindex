@@ -1,5 +1,5 @@
 /*
- * This file is part of SLM-Transform
+ *  This file is part of SLM-Transform
  *  Copyright (C) 2019  Muhammad Haseeb, Fahad Saeed
  *  Florida International University, Miami, FL
  *
@@ -27,13 +27,23 @@
 //#undef _OPENMP
 
 /* Define if OS == WINDOWS*/
-#undef WINDOWS
+#define WINDOWS
 
 /* Enable to show SLMIndex Benchmark information  */
 #undef BENCHMARK
 
 /* Number of b- and y-ions per indexed fragment   */
-#define F                        45
+#define GENDATA
+
+#define GENFEATS
+
+#undef GENBA
+
+#undef LIBSVM
+
+#ifndef LIBSVM
+ #define CSV
+#endif
 
 /* Fragment mass tolerance in (Daltons * SCALE)   */
 #define dF                        5 // = 0.05Da
@@ -44,6 +54,10 @@
 /* Max fragment charge to expect                  */
 #define MAXz                      3
 
+#ifdef GENDATA
+ #define B_FEATURES              4
+ #define Y_FEATURES              4
+#endif
 /* Scaling factor for integer conversion          */
 #define SCALE                    100
 
@@ -52,7 +66,7 @@
 
 /* Min and Max length of peptide sequence         */
 #define MIN_SEQ_LEN               6
-#define MAX_SEQ_LEN              60
+#define MAX_SEQ_LEN              40
 
 /* Min and Max precursor mass for peptide         */
 #define MIN_MASS                 100
@@ -73,7 +87,9 @@
 #define VMODS
 
 /* Chunk size in number of peptides (def: 1.8M)   */
-#define CHUNKSIZE                18000000
+#define MAX_IONS                0x80000000
+
+#define CELLBLOCK               0xCE11B10C
 
 /* Enable debug checkpoints                       */
 #undef DEBUG

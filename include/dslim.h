@@ -38,11 +38,12 @@
  * INPUT:
  * @threads: Number of parallel threads to launch
  * @modInfo: DSLIM mods Information
+ * @peplen : Peptide Lengths to expect
  *
  * OUTPUT:
  * @status: status of execution
  */
-STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo);
+STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo, STRING dirpath, Index *index);
 
 /*
  * FUNCTION: DSLIM_AllocateMemory
@@ -56,7 +57,7 @@ STATUS DSLIM_Construct(UINT threads, SLM_vMods *modInfo);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_AllocateMemory(UINT, UINT);
+STATUS DSLIM_AllocateMemory(Index *index);
 
 /*
  * FUNCTION: DSLIM_ConstructChunk
@@ -68,7 +69,7 @@ STATUS DSLIM_AllocateMemory(UINT, UINT);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number);
+STATUS DSLIM_ConstructChunk(UINT threads, Index *index, UINT chunk_number);
 
 /*
  * FUNCTION: DSLIM_SLMTransform
@@ -82,7 +83,22 @@ STATUS DSLIM_ConstructChunk(UINT threads, UINT chunk_number);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_SLMTransform(UINT threads, UINT chunk_number);
+STATUS DSLIM_SLMTransform(UINT threads, Index *index, UINT chunk_number);
+
+/*
+ * FUNCTION: DSLIM_Optimize
+ *
+ * DESCRIPTION: Constructs SLIM Transform
+ *
+ * INPUT:
+ * @threads     : Number of parallel threads
+ * @index       : The SLM Index
+ * @chunk_number: Chunk Index
+ *
+ * OUTPUT:
+ * @status: Status of execution
+ */
+STATUS DSLIM_Optimize(UINT threads, Index *index, UINT chunk_number);
 
 /*
  * FUNCTION: DSLIM_InitializeSC
@@ -95,7 +111,7 @@ STATUS DSLIM_SLMTransform(UINT threads, UINT chunk_number);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_InitializeSC(UINT threads);
+STATUS DSLIM_InitializeSC(UINT threads, Index *index);
 
 /*
  * FUNCTION: DSLIM_Analyze
@@ -122,7 +138,10 @@ STATUS DSLIM_Analyze(UINT threads, DOUBLE &mean, DOUBLE &std);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_Deinitialize(VOID);
+STATUS DSLIM_Deinitialize(Index *index);
+STATUS DSLIM_DeallocateSC(VOID);
+
+STATUS DSLIM_DeallocateSpecArr(VOID);
 
 /* FUNCTION: DSLIM_QuerySpectrum
  *
@@ -138,6 +157,20 @@ STATUS DSLIM_Deinitialize(VOID);
  * OUTPUT:
  * @status: Status of execution
  */
-STATUS DSLIM_QuerySpectrum(UINT *QA, UINT len, UINT *Matches, UINT threads);
+STATUS DSLIM_QuerySpectrum(UINT *QA, UINT len, ULONGLONG &Matches, UINT threads, Index *index, UINT indexchunks);
 
+/* FUNCTION: DSLIM_WriteLIBSVM
+ *
+ * DESCRIPTION: Write the MS/MS spectra data in libsvm format
+ *
+ * INPUT:
+ * @path   : Path for output data
+ * @chno   : Chunk number
+ *
+ * OUTPUT:
+ * @status: Status of execution
+ */
+STATUS DSLIM_WriteLIBSVM(STRING path, UINT peplen, UINT chno);
+
+STATUS DSLIM_WriteCSV(STRING path, UINT peplen, UINT chno);
 #endif /* DSLIM_H_ */
