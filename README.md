@@ -56,4 +56,6 @@ The sample application shows the software pipeline for successfully incorporatin
 4. Please contact us if you experience any trouble or bugs in the software. Thanks. :)
 
 # Please cite our work
+Haseeb, Muhammad, Muaaz Gul Awan, Alexander Cadigan, and Fahad Saeed. "SLM-Transform: A Method for Memory-Efficient Indexing of Spectra for Database Search in LC-MS/MS Proteomics." bioRxiv (2019): 531681.
+
 For queries or questions about CFIR-Index, please contact: {fsaeed, mhaseeb}@fiu.edu. Thank you.
